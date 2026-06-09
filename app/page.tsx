@@ -1,11 +1,9 @@
-// app/page.tsx
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState, useEffect } from "react";
 import PuzzleScene from "@/components/PuzzleScene";
 import { PuzzleHandle } from "@/components/Puzzle";
 
-// Inline SVG icons to avoid extra deps
 function IconMail() {
   return (
     <svg
@@ -131,16 +129,39 @@ function IconRefresh() {
 
 export default function Home() {
   const puzzleRef = useRef<PuzzleHandle>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let raf: number;
+    function poll() {
+      setBusy(puzzleRef.current?.isBusy() ?? false);
+      raf = requestAnimationFrame(poll);
+    }
+    raf = requestAnimationFrame(poll);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const iconBtnStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 38,
+    height: 38,
+    borderRadius: "50%",
+    border: "1px solid rgba(0,0,0,0.15)",
+    backgroundColor: "rgba(255,255,255,0.6)",
+    color: "rgba(0,0,0,0.65)",
+    backdropFilter: "blur(4px)",
+    transition: "all 0.15s ease",
+  };
 
   return (
     <main
       style={{ backgroundColor: "#efefef" }}
       className="w-screen h-screen relative overflow-hidden"
     >
-      {/* 3D SCENE */}
       <PuzzleScene puzzleRef={puzzleRef} />
 
-      {/* UI OVERLAY */}
       <div className="absolute inset-0 pointer-events-none">
         {/* TOP LEFT */}
         <div className="absolute top-8 left-8 text-black">
@@ -155,7 +176,6 @@ export default function Home() {
           >
             LOUIS TIBOLDO
           </h1>
-
           <p
             style={{
               fontFamily: "var(--font-geist-mono), monospace",
@@ -168,8 +188,6 @@ export default function Home() {
           >
             MAKER&nbsp;•&nbsp;ENGINEER&nbsp;•&nbsp;INVENTOR
           </p>
-
-          {/* SOCIAL ICON BUTTONS */}
           <div className="flex gap-2 mt-4 pointer-events-auto">
             {[
               { href: "mailto:you@example.com", icon: <IconMail /> },
@@ -183,19 +201,7 @@ export default function Home() {
                 href={href}
                 target={href.startsWith("mailto") ? undefined : "_blank"}
                 rel="noopener noreferrer"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 38,
-                  height: 38,
-                  borderRadius: "50%",
-                  border: "1px solid rgba(0,0,0,0.15)",
-                  backgroundColor: "rgba(255,255,255,0.6)",
-                  color: "rgba(0,0,0,0.65)",
-                  backdropFilter: "blur(4px)",
-                  transition: "all 0.15s ease",
-                }}
+                style={iconBtnStyle}
                 onMouseEnter={(e) => {
                   (e.currentTarget as HTMLElement).style.backgroundColor =
                     "rgba(0,0,0,0.08)";
@@ -217,8 +223,12 @@ export default function Home() {
         {/* BOTTOM CONTROLS */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-auto">
           <div className="flex gap-3">
+            {/* Shuffle — dark */}
             <button
-              onClick={() => puzzleRef.current?.shuffle()}
+              onClick={() => {
+                if (!busy) puzzleRef.current?.shuffle();
+              }}
+              disabled={busy}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -228,25 +238,31 @@ export default function Home() {
                 backgroundColor: "#111",
                 color: "#fff",
                 border: "none",
-                cursor: "pointer",
+                cursor: busy ? "not-allowed" : "pointer",
                 fontSize: "0.875rem",
                 fontWeight: 500,
                 fontFamily: "var(--font-geist-sans), Arial, sans-serif",
+                opacity: busy ? 0.45 : 1,
                 transition: "opacity 0.15s",
               }}
-              onMouseEnter={(e) =>
-                ((e.currentTarget as HTMLElement).style.opacity = "0.8")
-              }
-              onMouseLeave={(e) =>
-                ((e.currentTarget as HTMLElement).style.opacity = "1")
-              }
+              onMouseEnter={(e) => {
+                if (!busy)
+                  (e.currentTarget as HTMLElement).style.opacity = "0.8";
+              }}
+              onMouseLeave={(e) => {
+                if (!busy) (e.currentTarget as HTMLElement).style.opacity = "1";
+              }}
             >
               <IconShuffle />
               Shuffle
             </button>
 
+            {/* Solve — white (original style, never changes) */}
             <button
-              onClick={() => puzzleRef.current?.solve()}
+              onClick={() => {
+                if (!busy) puzzleRef.current?.solve();
+              }}
+              disabled={busy}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -256,19 +272,19 @@ export default function Home() {
                 backgroundColor: "#fff",
                 color: "#111",
                 border: "1px solid rgba(0,0,0,0.15)",
-                cursor: "pointer",
+                cursor: busy ? "not-allowed" : "pointer",
                 fontSize: "0.875rem",
                 fontWeight: 500,
                 fontFamily: "var(--font-geist-sans), Arial, sans-serif",
-                transition: "all 0.15s",
+                opacity: busy ? 0.45 : 1,
+                transition: "opacity 0.15s",
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.backgroundColor = "#111";
-                (e.currentTarget as HTMLElement).style.color = "#fff";
+                if (!busy)
+                  (e.currentTarget as HTMLElement).style.opacity = "0.8";
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.backgroundColor = "#fff";
-                (e.currentTarget as HTMLElement).style.color = "#111";
+                if (!busy) (e.currentTarget as HTMLElement).style.opacity = "1";
               }}
             >
               <IconRefresh />
