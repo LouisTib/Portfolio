@@ -62,7 +62,7 @@ export interface CubieState {
   x: number;
   y: number;
   z: number;
-  matrix: THREE.Matrix4; // accumulated orientation
+  matrix: THREE.Matrix4;
 }
 
 function applyMoveToState(cubies: CubieState[], move: Move): CubieState[] {
@@ -100,9 +100,10 @@ function easeInOutQuint(t: number): number {
   return t < 0.5 ? 16 * t ** 5 : 1 - (-2 * t + 2) ** 5 / 2;
 }
 
-export const SPACING = 1.01;
+// Reduced from 1.01 → tighter gaps between cubies for a more realistic look
+export const SPACING = 1.004;
 const TARGET = Math.PI / 2;
-const SPEED = 4.2; // rad/s → ~0.37 s per move
+const SPEED = 4.2;
 
 const Puzzle = forwardRef<PuzzleHandle>((_, ref) => {
   const [cubies, setCubies] = useState<CubieState[]>(() =>
@@ -124,15 +125,11 @@ const Puzzle = forwardRef<PuzzleHandle>((_, ref) => {
   const history = useRef<Move[]>([]);
   const busy = useRef(false);
 
-  // Current animation — all imperative, lives in refs
   const animMove = useRef<Move | null>(null);
   const animElapsed = useRef(0);
 
-  // The group that gets rotated for the active layer
   const layerGroupRef = useRef<THREE.Group>(null);
 
-  // Tracks which cubies are in the layer group vs static group
-  // We use a state variable so React re-partitions on move changes
   const [activeMove, setActiveMove] = useState<Move | null>(null);
 
   useImperativeHandle(ref, () => ({
@@ -158,7 +155,6 @@ const Puzzle = forwardRef<PuzzleHandle>((_, ref) => {
   }));
 
   useFrame((_, delta) => {
-    // Start next move
     if (!animMove.current) {
       if (queue.current.length === 0) {
         busy.current = false;
@@ -168,11 +164,9 @@ const Puzzle = forwardRef<PuzzleHandle>((_, ref) => {
       const move = queue.current.shift()!;
       animMove.current = move;
       animElapsed.current = 0;
-      // Reset layer group rotation
       if (layerGroupRef.current) layerGroupRef.current.rotation.set(0, 0, 0);
-      // Tell React which layer is active so it moves cubies into layerGroup
       setActiveMove(move);
-      return; // give React one frame to re-partition
+      return;
     }
 
     animElapsed.current = Math.min(animElapsed.current + delta * SPEED, TARGET);
@@ -189,7 +183,6 @@ const Puzzle = forwardRef<PuzzleHandle>((_, ref) => {
     }
 
     if (animElapsed.current >= TARGET) {
-      // Bake move into logical state
       const completed = animMove.current;
       animMove.current = null;
       if (layerGroupRef.current) layerGroupRef.current.rotation.set(0, 0, 0);
@@ -203,7 +196,6 @@ const Puzzle = forwardRef<PuzzleHandle>((_, ref) => {
     }
   });
 
-  // Partition cubies into the active layer vs the rest
   const layerIds = new Set<number>();
   if (activeMove) {
     cubies.forEach((c) => {
@@ -215,7 +207,6 @@ const Puzzle = forwardRef<PuzzleHandle>((_, ref) => {
 
   return (
     <group>
-      {/* Static cubies */}
       <group>
         {cubies
           .filter((c) => !layerIds.has(c.id))
@@ -235,7 +226,6 @@ const Puzzle = forwardRef<PuzzleHandle>((_, ref) => {
           ))}
       </group>
 
-      {/* Rotating layer group */}
       <group ref={layerGroupRef}>
         {cubies
           .filter((c) => layerIds.has(c.id))

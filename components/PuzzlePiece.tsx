@@ -66,9 +66,10 @@ function makeFaceTexture(
   slice: [number, number] | null,
   outer: boolean,
 ): THREE.CanvasTexture {
+  // Increased BORDER slightly, and RADIUS dramatically for rounder sticker corners
   const S = 256,
-    BORDER = 13,
-    RADIUS = 9;
+    BORDER = 10,
+    RADIUS = 28;
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = S;
   const ctx = canvas.getContext("2d")!;
@@ -172,7 +173,6 @@ export default function PuzzlePiece({
 
   const meshRef = useRef<THREE.Mesh>(null);
 
-  // Decompose the accumulated rotation matrix and apply it to the mesh
   useEffect(() => {
     if (!meshRef.current) return;
     const quat = new THREE.Quaternion();
