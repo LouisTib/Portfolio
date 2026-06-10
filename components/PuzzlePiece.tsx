@@ -53,12 +53,16 @@ function getPortraitSlice(
 ): [number, number] | null {
   if (!isOuter(axis, dir, gx, gy, gz)) return null;
 
+  // FRONT / BACK (correct)
   if (axis === "z" && dir === "pos") return [gx, 2 - gy];
   if (axis === "z" && dir === "neg") return [2 - gx, 2 - gy];
 
-  if (axis === "x" && dir === "pos") return [gz, 2 - gy];
-  if (axis === "x" && dir === "neg") return [2 - gz, 2 - gy];
+  // LEFT / RIGHT (FIXED PROPER UV ORIENTATION)
+  // u = z, v = y
+  if (axis === "x" && dir === "pos") return [2 - gz, 2 - gy];
+  if (axis === "x" && dir === "neg") return [gz, 2 - gy];
 
+  // TOP / BOTTOM (correct)
   if (axis === "y" && dir === "pos") return [gx, gz];
   if (axis === "y" && dir === "neg") return [gx, 2 - gz];
 
@@ -83,7 +87,11 @@ function makeFaceTexture(
   ctx.fillStyle = "#111111";
   ctx.fillRect(0, 0, S, S);
 
-  if (!outer) return new THREE.CanvasTexture(canvas);
+  if (!outer) {
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
 
   const bx = BORDER;
   const by = BORDER;
@@ -149,12 +157,8 @@ export default function PuzzlePiece({
 
       return new THREE.MeshStandardMaterial({
         map: makeFaceTexture(FACE_COLORS[key], portrait, slice, outer),
-
         roughness: 0.25,
         metalness: 0,
-
-        // 🔥 IMPORTANT: prevents depth flicker
-        depthWrite: false,
       });
     });
   }, [origX, origY, origZ, portrait]);
@@ -166,7 +170,6 @@ export default function PuzzlePiece({
 
     const q = new THREE.Quaternion();
     q.setFromRotationMatrix(matrix);
-
     groupRef.current.quaternion.copy(q);
   }, [matrix]);
 
@@ -191,7 +194,7 @@ export default function PuzzlePiece({
 
       {/* STICKERS */}
       <mesh renderOrder={2} castShadow={false} receiveShadow={false}>
-        <boxGeometry args={[0.962, 0.962, 0.962]} />
+        <boxGeometry args={[0.97, 0.97, 0.97]} />
         {materials.map((mat, i) => (
           <primitive key={i} object={mat} attach={`material-${i}`} />
         ))}
