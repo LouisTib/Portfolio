@@ -21,7 +21,6 @@ interface PuzzleSceneProps {
 export default function PuzzleScene({ puzzleRef }: PuzzleSceneProps) {
   return (
     <Canvas
-      // Pulled back from [6.5, 5, 6.5] → more zoomed out on load
       camera={{ position: [9, 7, 9], fov: 38 }}
       shadows="soft"
       gl={{
@@ -80,8 +79,8 @@ export default function PuzzleScene({ puzzleRef }: PuzzleSceneProps) {
         enablePan={false}
         minDistance={5}
         maxDistance={18}
-        minPolarAngle={Math.PI / 6}
-        maxPolarAngle={Math.PI / 1.8}
+        minPolarAngle={0} // was Math.PI / 6 — now allows full top-down view
+        maxPolarAngle={Math.PI} // was Math.PI / 1.8 — now allows full bottom view
       />
     </Canvas>
   );

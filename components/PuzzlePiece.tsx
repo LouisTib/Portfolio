@@ -4,6 +4,7 @@ import { useRef, useMemo, useEffect } from "react";
 import * as THREE from "three";
 import { useLoader } from "@react-three/fiber";
 import { TextureLoader } from "three";
+import { RoundedBox } from "@react-three/drei";
 
 const FACE_COLORS: Record<string, string> = {
   right: "#B90000",
@@ -66,7 +67,6 @@ function makeFaceTexture(
   slice: [number, number] | null,
   outer: boolean,
 ): THREE.CanvasTexture {
-  // Increased BORDER slightly, and RADIUS dramatically for rounder sticker corners
   const S = 256,
     BORDER = 10,
     RADIUS = 28;
@@ -74,8 +74,8 @@ function makeFaceTexture(
   canvas.width = canvas.height = S;
   const ctx = canvas.getContext("2d")!;
 
-  ctx.fillStyle = "#111";
-  ctx.fillRect(0, 0, S, S);
+  // Transparent background — the RoundedBox body behind shows through as the dark plastic
+  ctx.clearRect(0, 0, S, S);
   if (!outer) return new THREE.CanvasTexture(canvas);
 
   const bx = BORDER,
@@ -166,28 +166,47 @@ export default function PuzzlePiece({
         roughness: 0.12,
         metalness: 0.0,
         envMapIntensity: 1.2,
+        transparent: true, // needed so the canvas alpha (gap between stickers) shows through
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origX, origY, origZ, portrait]);
 
+  const groupRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.Mesh>(null);
 
   useEffect(() => {
-    if (!meshRef.current) return;
+    if (!groupRef.current) return;
     const quat = new THREE.Quaternion();
     const scale = new THREE.Vector3();
     const pos = new THREE.Vector3();
     matrix.decompose(pos, quat, scale);
-    meshRef.current.quaternion.copy(quat);
+    groupRef.current.quaternion.copy(quat);
   }, [matrix]);
 
   return (
-    <mesh ref={meshRef} position={position} castShadow receiveShadow>
-      <boxGeometry args={[0.96, 0.96, 0.96]} />
-      {materials.map((mat, i) => (
-        <primitive key={i} object={mat} attach={`material-${i}`} />
-      ))}
-    </mesh>
+    // Group holds both the dark rounded body and the sticker layer
+    <group ref={groupRef} position={position}>
+      {/* Dark plastic rounded body — this gives physically rounded corners */}
+      <RoundedBox
+        args={[0.96, 0.96, 0.96]}
+        radius={0.08}
+        smoothness={4}
+        castShadow
+        receiveShadow
+      >
+        <meshStandardMaterial color="#111111" roughness={0.5} metalness={0.0} />
+      </RoundedBox>
+
+      {/* Sticker layer — standard boxGeometry so per-face materials work correctly.
+          Sized very slightly smaller than the body so it sits flush on the flat faces
+          and the rounded edges of the body peek out at the corners. */}
+      <mesh ref={meshRef} castShadow>
+        <boxGeometry args={[0.955, 0.955, 0.955]} />
+        {materials.map((mat, i) => (
+          <primitive key={i} object={mat} attach={`material-${i}`} />
+        ))}
+      </mesh>
+    </group>
   );
 }
