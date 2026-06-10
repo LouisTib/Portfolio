@@ -74,8 +74,10 @@ function makeFaceTexture(
   canvas.width = canvas.height = S;
   const ctx = canvas.getContext("2d")!;
 
-  // Transparent background — the RoundedBox body behind shows through as the dark plastic
-  ctx.clearRect(0, 0, S, S);
+  // Dark plastic background for all faces (gaps between stickers show as dark)
+  ctx.fillStyle = "#111111";
+  ctx.fillRect(0, 0, S, S);
+
   if (!outer) return new THREE.CanvasTexture(canvas);
 
   const bx = BORDER,
@@ -166,7 +168,10 @@ export default function PuzzlePiece({
         roughness: 0.12,
         metalness: 0.0,
         envMapIntensity: 1.2,
-        transparent: true, // needed so the canvas alpha (gap between stickers) shows through
+        transparent: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
       });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -198,11 +203,10 @@ export default function PuzzlePiece({
         <meshStandardMaterial color="#111111" roughness={0.5} metalness={0.0} />
       </RoundedBox>
 
-      {/* Sticker layer — standard boxGeometry so per-face materials work correctly.
-          Sized very slightly smaller than the body so it sits flush on the flat faces
-          and the rounded edges of the body peek out at the corners. */}
+      {/* Sticker layer — slightly larger than RoundedBox flat faces so it
+          protrudes past the flat portions. polygonOffset prevents z-fighting. */}
       <mesh ref={meshRef} castShadow>
-        <boxGeometry args={[0.955, 0.955, 0.955]} />
+        <boxGeometry args={[0.965, 0.965, 0.965]} />
         {materials.map((mat, i) => (
           <primitive key={i} object={mat} attach={`material-${i}`} />
         ))}
