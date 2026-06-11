@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useRef, useEffect } from "react";
 import * as THREE from "three";
 import { useLoader } from "@react-three/fiber";
 import { TextureLoader } from "three";
 import { RoundedBox } from "@react-three/drei";
 
-// ─── Face definitions ──────────────────────────────────────────────────────
+useLoader.preload(TextureLoader, "/portrait.jpg");
 
 const FACE_COLORS: Record<string, string> = {
   right: "#B90000",
@@ -26,8 +26,6 @@ const FACE_DEFS = [
   { axis: "z" as const, dir: "neg" as const, key: "back" },
 ];
 
-// ─── Props ─────────────────────────────────────────────────────────────────
-
 interface Props {
   groupRef: (el: THREE.Group | null) => void;
   position: [number, number, number];
@@ -35,8 +33,6 @@ interface Props {
   origY: number;
   origZ: number;
 }
-
-// ─── Geometry helpers ──────────────────────────────────────────────────────
 
 function isOuter(
   axis: "x" | "y" | "z",
@@ -67,19 +63,6 @@ function getPortraitSlice(
   return null;
 }
 
-// ─── Material cache ────────────────────────────────────────────────────────
-//
-// Three tiers — materials are NEVER mutated after creation:
-//
-//   "inner"            → plain black, used for all inner faces
-//   "plain:<color>"    → solid color sticker, used for outer faces UNTIL
-//                        the portrait image has loaded
-//   "img:<color>:<col>,<row>" → portrait-composited texture, built once
-//                        the portrait is available; replaces plain in useMemo
-//
-// Because we never swap a texture on an existing material there is no
-// one-frame black gap — each material is complete when first assigned.
-
 const materialCache = new Map<string, THREE.MeshStandardMaterial>();
 
 function buildFaceCanvas(
@@ -90,12 +73,10 @@ function buildFaceCanvas(
   const S = 256;
   const BORDER = 10;
   const RADIUS = 28;
-
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = S;
   const ctx = canvas.getContext("2d")!;
 
-  // Dark background (shows at corners outside the rounded rect)
   ctx.fillStyle = "#111111";
   ctx.fillRect(0, 0, S, S);
 
@@ -118,14 +99,12 @@ function buildFaceCanvas(
     ctx.closePath();
   }
 
-  // Solid color base
   ctx.save();
   roundRect();
   ctx.fillStyle = color;
   ctx.fill();
   ctx.restore();
 
-  // Portrait slice on top
   const [col, row] = slice;
   const sw = portrait.width / 3;
   const sh = portrait.height / 3;
@@ -144,7 +123,6 @@ function getCachedMaterial(
   slice: [number, number] | null,
   outer: boolean,
 ): THREE.MeshStandardMaterial {
-  // ── Inner face ──────────────────────────────────────────────────────────
   if (!outer) {
     const key = "inner";
     if (!materialCache.has(key)) {
@@ -154,14 +132,13 @@ function getCachedMaterial(
           color: "#111111",
           roughness: 0.25,
           metalness: 0,
+          depthWrite: false, // inner faces never need to win the depth test
         }),
       );
     }
     return materialCache.get(key)!;
   }
 
-  // ── Outer face with portrait ────────────────────────────────────────────
-  // Only create the portrait material once the image is fully loaded.
   if (portrait && slice) {
     const key = `img:${color}:${slice.join(",")}`;
     if (!materialCache.has(key)) {
@@ -175,14 +152,16 @@ function getCachedMaterial(
           map: tex,
           roughness: 0.25,
           metalness: 0,
+          depthWrite: false, // sticker sits on top of body; skip depth writes
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -1,
         }),
       );
     }
     return materialCache.get(key)!;
   }
 
-  // ── Outer face — portrait not yet loaded ────────────────────────────────
-  // Plain solid color — no texture to upload, nothing to swap later.
   const key = `plain:${color}`;
   if (!materialCache.has(key)) {
     materialCache.set(
@@ -191,13 +170,15 @@ function getCachedMaterial(
         color,
         roughness: 0.25,
         metalness: 0,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
       }),
     );
   }
   return materialCache.get(key)!;
 }
-
-// ─── Shared body material ──────────────────────────────────────────────────
 
 let sharedBodyMaterial: THREE.MeshStandardMaterial | null = null;
 function getBodyMaterial() {
@@ -206,12 +187,19 @@ function getBodyMaterial() {
       color: "#111111",
       roughness: 0.5,
       metalness: 0,
+      // Body DOES write depth — it is the base surface
     });
   }
   return sharedBodyMaterial;
 }
 
-// ─── Component ─────────────────────────────────────────────────────────────
+let sharedBoxGeometry: THREE.BoxGeometry | null = null;
+function getBoxGeometry() {
+  if (!sharedBoxGeometry) {
+    sharedBoxGeometry = new THREE.BoxGeometry(0.97, 0.97, 0.97);
+  }
+  return sharedBoxGeometry;
+}
 
 export default function PuzzlePiece({
   groupRef,
@@ -221,41 +209,46 @@ export default function PuzzlePiece({
   origZ,
 }: Props) {
   const texture = useLoader(TextureLoader, "/portrait.jpg");
-  const portrait = texture.image as HTMLImageElement | null;
+  const stickerRef = useRef<THREE.Mesh>(null);
 
-  // Re-runs once when portrait goes from null → loaded.
-  // On the first pass (no portrait) it hands out plain: materials.
-  // On the second pass it looks up / creates img: materials — which are
-  // already fully composited, so Three.js uploads a complete texture
-  // with no intermediate black frame.
-  const materials = useMemo(() => {
-    return FACE_DEFS.map(({ axis, dir, key }) => {
+  useEffect(() => {
+    const mesh = stickerRef.current;
+    if (!mesh) return;
+    const portrait = texture.image as HTMLImageElement | null;
+    const mats = FACE_DEFS.map(({ axis, dir, key }) => {
       const outer = isOuter(axis, dir, origX, origY, origZ);
       const slice = outer
         ? getPortraitSlice(axis, dir, origX, origY, origZ)
         : null;
       return getCachedMaterial(FACE_COLORS[key], portrait, slice, outer);
     });
-  }, [origX, origY, origZ, portrait]);
+    mesh.material = mats;
+  }, [texture, origX, origY, origZ]);
 
   return (
-    <group ref={groupRef} position={position} renderOrder={1}>
+    <group ref={groupRef} position={position}>
       <RoundedBox
         args={[0.96, 0.96, 0.96]}
         radius={0.08}
         smoothness={4}
         castShadow={false}
         receiveShadow={false}
-      >
-        <primitive object={getBodyMaterial()} attach="material" />
-      </RoundedBox>
-
-      <mesh renderOrder={2} castShadow={false} receiveShadow={false}>
-        <boxGeometry args={[0.97, 0.97, 0.97]} />
-        {materials.map((mat, i) => (
-          <primitive key={i} object={mat} attach={`material-${i}`} />
-        ))}
-      </mesh>
+        material={getBodyMaterial()}
+      />
+      {/*
+        renderOrder={1} ensures this draws after the body in the same pass.
+        depthWrite=false (set on every material above) means it never occludes
+        itself or neighbouring cubies — it just composites on top of whatever
+        the depth buffer already accepted. Combined with polygonOffset this
+        eliminates the z-fighting black flash entirely, even mid-rotation.
+      */}
+      <mesh
+        ref={stickerRef}
+        geometry={getBoxGeometry()}
+        renderOrder={1}
+        castShadow={false}
+        receiveShadow={false}
+      />
     </group>
   );
 }
