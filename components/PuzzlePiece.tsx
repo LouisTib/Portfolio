@@ -53,50 +53,44 @@ function getPortraitSlice(
 ): [number, number] | null {
   if (!isOuter(axis, dir, gx, gy, gz)) return null;
 
-  // FRONT / BACK (correct)
   if (axis === "z" && dir === "pos") return [gx, 2 - gy];
   if (axis === "z" && dir === "neg") return [2 - gx, 2 - gy];
-
-  // LEFT / RIGHT (FIXED PROPER UV ORIENTATION)
-  // u = z, v = y
   if (axis === "x" && dir === "pos") return [2 - gz, 2 - gy];
   if (axis === "x" && dir === "neg") return [gz, 2 - gy];
-
-  // TOP / BOTTOM (correct)
   if (axis === "y" && dir === "pos") return [gx, gz];
   if (axis === "y" && dir === "neg") return [gx, 2 - gz];
 
   return null;
 }
 
-function makeFaceTexture(
+// ─── Global material cache ─────────────────────────────────────────────────
+// Keyed by a string that uniquely identifies this face sticker.
+// Materials and their textures are NEVER disposed — they live for the page
+// lifetime and are shared across all pieces. This prevents the flash that
+// occurs when a piece unmounts (rotating↔static group swap) and dispose()
+// invalidates a texture that other pieces are still using.
+const materialCache = new Map<string, THREE.MeshStandardMaterial>();
+
+function buildFaceCanvas(
   color: string,
   portrait: HTMLImageElement | null,
   slice: [number, number] | null,
-  outer: boolean,
-): THREE.CanvasTexture {
+): HTMLCanvasElement {
   const S = 256;
   const BORDER = 10;
   const RADIUS = 28;
 
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = S;
-
   const ctx = canvas.getContext("2d")!;
 
   ctx.fillStyle = "#111111";
   ctx.fillRect(0, 0, S, S);
 
-  if (!outer) {
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
-  }
-
-  const bx = BORDER;
-  const by = BORDER;
-  const bw = S - BORDER * 2;
-  const bh = S - BORDER * 2;
+  const bx = BORDER,
+    by = BORDER;
+  const bw = S - BORDER * 2,
+    bh = S - BORDER * 2;
 
   function roundRect() {
     ctx.beginPath();
@@ -120,24 +114,106 @@ function makeFaceTexture(
 
   if (portrait && slice) {
     const [col, row] = slice;
-
     const sw = portrait.width / 3;
     const sh = portrait.height / 3;
-
     ctx.save();
     roundRect();
     ctx.clip();
-
     ctx.drawImage(portrait, col * sw, row * sh, sw, sh, bx, by, bw, bh);
-
     ctx.restore();
   }
 
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
+  return canvas;
+}
 
-  return tex;
+function getCachedMaterial(
+  color: string,
+  portrait: HTMLImageElement | null,
+  slice: [number, number] | null,
+  outer: boolean,
+): THREE.MeshStandardMaterial {
+  const key = outer
+    ? `outer:${color}:${slice ? slice.join(",") : "none"}:${portrait ? "img" : "noimg"}`
+    : "inner";
+
+  const cached = materialCache.get(key);
+  if (cached) return cached;
+
+  let mat: THREE.MeshStandardMaterial;
+
+  if (!outer) {
+    // Inner faces: plain black, no texture needed
+    mat = new THREE.MeshStandardMaterial({
+      color: "#111111",
+      roughness: 0.25,
+      metalness: 0,
+    });
+  } else {
+    const canvas = buildFaceCanvas(color, portrait, slice);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+
+    mat = new THREE.MeshStandardMaterial({
+      map: tex,
+      roughness: 0.25,
+      metalness: 0,
+    });
+  }
+
+  materialCache.set(key, mat);
+  return mat;
+}
+
+// Portrait-loaded versions replace the noimg entries once the image is ready.
+// We track which keys need upgrading so we don't redo work.
+const upgradedKeys = new Set<string>();
+
+function upgradePortraitMaterials(portrait: HTMLImageElement) {
+  for (const [key, mat] of materialCache.entries()) {
+    if (!key.startsWith("outer:") || !key.endsWith(":noimg")) continue;
+    if (upgradedKeys.has(key)) continue;
+
+    // Parse the key back to color + slice
+    // format: outer:<color>:<col,row|none>:noimg
+    const parts = key.split(":");
+    const color = parts[1];
+    const sliceStr = parts[2];
+    const slice: [number, number] | null =
+      sliceStr === "none"
+        ? null
+        : (sliceStr.split(",").map(Number) as [number, number]);
+
+    const canvas = buildFaceCanvas(color, portrait, slice);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+
+    // Swap the texture on the existing material in place — no remount needed
+    if (mat.map) mat.map.dispose();
+    mat.map = tex;
+    mat.needsUpdate = true;
+
+    // Also store the upgraded version under the "img" key so future pieces
+    // get it directly without going through the noimg path.
+    const imgKey = key.replace(":noimg", ":img");
+    materialCache.set(imgKey, mat);
+
+    upgradedKeys.add(key);
+  }
+}
+
+// ─── Shared body material ──────────────────────────────────────────────────
+let sharedBodyMaterial: THREE.MeshStandardMaterial | null = null;
+function getBodyMaterial() {
+  if (!sharedBodyMaterial) {
+    sharedBodyMaterial = new THREE.MeshStandardMaterial({
+      color: "#111111",
+      roughness: 0.5,
+      metalness: 0,
+    });
+  }
+  return sharedBodyMaterial;
 }
 
 export default function PuzzlePiece({
@@ -150,16 +226,20 @@ export default function PuzzlePiece({
   const texture = useLoader(TextureLoader, "/portrait.jpg");
   const portrait = texture.image as HTMLImageElement | null;
 
+  // Upgrade any noimg cached materials once the portrait is available.
+  // This runs once per component instance after portrait loads, but
+  // upgradePortraitMaterials is idempotent via upgradedKeys.
+  if (portrait) upgradePortraitMaterials(portrait);
+
+  // Look up (or create) fully cached materials — stable references,
+  // zero allocation after the first render.
   const materials = useMemo(() => {
     return FACE_DEFS.map(({ axis, dir, key }) => {
       const outer = isOuter(axis, dir, origX, origY, origZ);
-      const slice = getPortraitSlice(axis, dir, origX, origY, origZ);
-
-      return new THREE.MeshStandardMaterial({
-        map: makeFaceTexture(FACE_COLORS[key], portrait, slice, outer),
-        roughness: 0.25,
-        metalness: 0,
-      });
+      const slice = outer
+        ? getPortraitSlice(axis, dir, origX, origY, origZ)
+        : null;
+      return getCachedMaterial(FACE_COLORS[key], portrait, slice, outer);
     });
   }, [origX, origY, origZ, portrait]);
 
@@ -167,21 +247,16 @@ export default function PuzzlePiece({
 
   useEffect(() => {
     if (!groupRef.current) return;
-
     const q = new THREE.Quaternion();
     q.setFromRotationMatrix(matrix);
     groupRef.current.quaternion.copy(q);
   }, [matrix]);
 
-  useEffect(() => {
-    return () => {
-      materials.forEach((m) => m.dispose());
-    };
-  }, [materials]);
+  // NO dispose — all materials are globally cached and shared.
+  // Disposing on unmount would flash/black-out other pieces using the same material.
 
   return (
     <group ref={groupRef} position={position} renderOrder={1}>
-      {/* BODY */}
       <RoundedBox
         args={[0.96, 0.96, 0.96]}
         radius={0.08}
@@ -189,10 +264,9 @@ export default function PuzzlePiece({
         castShadow={false}
         receiveShadow={false}
       >
-        <meshStandardMaterial color="#111111" roughness={0.5} metalness={0} />
+        <primitive object={getBodyMaterial()} attach="material" />
       </RoundedBox>
 
-      {/* STICKERS */}
       <mesh renderOrder={2} castShadow={false} receiveShadow={false}>
         <boxGeometry args={[0.97, 0.97, 0.97]} />
         {materials.map((mat, i) => (

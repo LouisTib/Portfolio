@@ -1,6 +1,12 @@
 "use client";
 
-import { useRef, forwardRef, useImperativeHandle, useState } from "react";
+import {
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+  useState,
+  useCallback,
+} from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import PuzzlePiece from "./PuzzlePiece";
@@ -30,20 +36,16 @@ function randomMoves(n = 20): Move[] {
 
   for (let i = 0; i < n; i++) {
     let ax: Move["axis"];
-
     do {
       ax = axes[Math.floor(Math.random() * 3)];
     } while (ax === lastAxis);
-
     lastAxis = ax;
-
     moves.push({
       axis: ax,
       layer: Math.floor(Math.random() * 3),
       dir: Math.random() > 0.5 ? 1 : -1,
     });
   }
-
   return moves;
 }
 
@@ -52,11 +54,9 @@ export interface Cubie {
   x: number;
   y: number;
   z: number;
-
   homeX: number;
   homeY: number;
   homeZ: number;
-
   matrix: THREE.Matrix4;
 }
 
@@ -72,7 +72,6 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
       const x = Math.floor(i / 9);
       const y = Math.floor((i % 9) / 3);
       const z = i % 3;
-
       return {
         id: i,
         x,
@@ -95,55 +94,54 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
 
   const layerRef = useRef<THREE.Group>(null);
 
-  const [, tick] = useState(0);
+  // ─── React state is ONLY used to trigger a re-render when the move
+  // boundary changes (new move starts / move ends). NOT called every frame.
+  const [activeMove, setActiveMove] = useState<Move | null>(null);
+
+  // Stable callback so we don't recreate it
+  const startNextMove = useCallback(() => {
+    if (queue.current.length === 0) {
+      busy.current = false;
+      active.current = null;
+      setActiveMove(null);
+      return;
+    }
+    const move = queue.current.shift()!;
+    active.current = move;
+    elapsed.current = 0;
+    setActiveMove({ ...move }); // trigger re-render once to reassign rotating group
+  }, []);
 
   useImperativeHandle(ref, () => ({
     shuffle() {
       if (busy.current) return;
-
       const moves = randomMoves(20);
       history.current = [...moves].reverse().map(inv);
       queue.current = moves;
-
       busy.current = true;
-      tick((v) => v + 1);
+      startNextMove();
     },
-
     solve() {
       if (busy.current) return;
-
       queue.current = history.current;
       history.current = [];
-
       busy.current = true;
-      tick((v) => v + 1);
+      startNextMove();
     },
-
     isBusy() {
       return busy.current;
     },
   }));
 
   useFrame((_, dt) => {
-    if (!active.current) {
-      if (queue.current.length === 0) {
-        busy.current = false;
-        return;
-      }
-
-      active.current = queue.current.shift()!;
-      elapsed.current = 0;
-      tick((v) => v + 1);
-      return;
-    }
+    if (!active.current) return;
 
     elapsed.current += dt * SPEED;
-
     const t = Math.min(elapsed.current / TARGET, 1);
     const angle = ease(t) * TARGET * active.current.dir;
-
     const ax = active.current.axis;
 
+    // Pure imperative mutation — zero React involvement per frame
     if (layerRef.current) {
       layerRef.current.rotation.set(
         ax === "x" ? angle : 0,
@@ -154,7 +152,11 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
 
     if (t >= 1) {
       const move = active.current;
-      active.current = null;
+
+      // Reset layer rotation before snapping
+      if (layerRef.current) {
+        layerRef.current.rotation.set(0, 0, 0);
+      }
 
       const axisVec =
         move.axis === "x"
@@ -170,27 +172,24 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
 
       for (const c of cubies.current) {
         const coord = move.axis === "x" ? c.x : move.axis === "y" ? c.y : c.z;
-
         if (coord !== move.layer) continue;
 
         const x = c.x - 1;
         const y = c.y - 1;
         const z = c.z - 1;
 
-        let nx = c.x;
-        let ny = c.y;
-        let nz = c.z;
+        let nx = c.x,
+          ny = c.y,
+          nz = c.z;
 
         if (move.axis === "x") {
           ny = Math.round(-z * move.dir) + 1;
           nz = Math.round(y * move.dir) + 1;
         }
-
         if (move.axis === "y") {
           nx = Math.round(z * move.dir) + 1;
           nz = Math.round(-x * move.dir) + 1;
         }
-
         if (move.axis === "z") {
           nx = Math.round(-y * move.dir) + 1;
           ny = Math.round(x * move.dir) + 1;
@@ -199,39 +198,34 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
         c.x = nx;
         c.y = ny;
         c.z = nz;
-
         c.matrix = rot.clone().multiply(c.matrix);
       }
+
+      active.current = null;
+      // Schedule next move — this is the only setState call per move boundary
+      startNextMove();
     }
   });
 
-  // -----------------------------
-  // 🔥 OPTIMIZED RENDER (NO FILTERS)
-  // -----------------------------
+  // ─── Render split: rotating vs static ─────────────────────────────────────
+  // Derived from `activeMove` state (stable between frames, only changes at
+  // move boundaries), so this block never re-runs during an animation frame.
 
-  const activeMove = active.current;
-
-  const rotatingSet = new Set<number>();
-
+  const rotatingIds = new Set<number>();
   if (activeMove) {
     for (const c of cubies.current) {
       const coord =
         activeMove.axis === "x" ? c.x : activeMove.axis === "y" ? c.y : c.z;
-
-      if (coord === activeMove.layer) {
-        rotatingSet.add(c.id);
-      }
+      if (coord === activeMove.layer) rotatingIds.add(c.id);
     }
   }
 
   return (
     <group>
+      {/* Rotating layer — driven imperatively via layerRef */}
       <group ref={layerRef}>
         {cubies.current.map((c) => {
-          const isRotating = rotatingSet.has(c.id);
-
-          if (!isRotating) return null;
-
+          if (!rotatingIds.has(c.id)) return null;
           return (
             <PuzzlePiece
               key={c.id}
@@ -249,12 +243,10 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
         })}
       </group>
 
+      {/* Static cubies */}
       <group>
         {cubies.current.map((c) => {
-          const isRotating = rotatingSet.has(c.id);
-
-          if (isRotating) return null;
-
+          if (rotatingIds.has(c.id)) return null;
           return (
             <PuzzlePiece
               key={c.id}
