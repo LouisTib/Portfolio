@@ -18,12 +18,48 @@ const FACE_COLORS: Record<string, string> = {
 };
 
 const FACE_DEFS = [
-  { axis: "x" as const, dir: "pos" as const, key: "right" },
-  { axis: "x" as const, dir: "neg" as const, key: "left" },
-  { axis: "y" as const, dir: "pos" as const, key: "top" },
-  { axis: "y" as const, dir: "neg" as const, key: "bottom" },
-  { axis: "z" as const, dir: "pos" as const, key: "front" },
-  { axis: "z" as const, dir: "neg" as const, key: "back" },
+  {
+    axis: "x" as const,
+    dir: "pos" as const,
+    key: "right",
+    rotation: [0, Math.PI / 2, 0] as [number, number, number],
+    offset: [0.482, 0, 0] as [number, number, number],
+  },
+  {
+    axis: "x" as const,
+    dir: "neg" as const,
+    key: "left",
+    rotation: [0, -Math.PI / 2, 0] as [number, number, number],
+    offset: [-0.482, 0, 0] as [number, number, number],
+  },
+  {
+    axis: "y" as const,
+    dir: "pos" as const,
+    key: "top",
+    rotation: [-Math.PI / 2, 0, 0] as [number, number, number],
+    offset: [0, 0.482, 0] as [number, number, number],
+  },
+  {
+    axis: "y" as const,
+    dir: "neg" as const,
+    key: "bottom",
+    rotation: [Math.PI / 2, 0, 0] as [number, number, number],
+    offset: [0, -0.482, 0] as [number, number, number],
+  },
+  {
+    axis: "z" as const,
+    dir: "pos" as const,
+    key: "front",
+    rotation: [0, 0, 0] as [number, number, number],
+    offset: [0, 0, 0.482] as [number, number, number],
+  },
+  {
+    axis: "z" as const,
+    dir: "neg" as const,
+    key: "back",
+    rotation: [0, Math.PI, 0] as [number, number, number],
+    offset: [0, 0, -0.482] as [number, number, number],
+  },
 ];
 
 interface Props {
@@ -117,67 +153,52 @@ function buildFaceCanvas(
   return canvas;
 }
 
-function getCachedMaterial(
-  color: string,
-  portrait: HTMLImageElement | null,
-  slice: [number, number] | null,
-  outer: boolean,
-): THREE.MeshStandardMaterial {
-  if (!outer) {
-    const key = "inner";
-    if (!materialCache.has(key)) {
+// Build and cache materials eagerly given a fully-loaded portrait image.
+// This is called once per cubie after the texture is confirmed loaded.
+function buildMaterials(
+  origX: number,
+  origY: number,
+  origZ: number,
+  portrait: HTMLImageElement,
+): (THREE.MeshStandardMaterial | null)[] {
+  return FACE_DEFS.map(({ axis, dir, key }) => {
+    const outer = isOuter(axis, dir, origX, origY, origZ);
+    if (!outer) return null;
+
+    const slice = getPortraitSlice(axis, dir, origX, origY, origZ);
+
+    if (slice) {
+      const cacheKey = `img:${FACE_COLORS[key]}:${slice.join(",")}`;
+      if (!materialCache.has(cacheKey)) {
+        const canvas = buildFaceCanvas(FACE_COLORS[key], portrait, slice);
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.needsUpdate = true;
+        materialCache.set(
+          cacheKey,
+          new THREE.MeshStandardMaterial({
+            map: tex,
+            roughness: 0.25,
+            metalness: 0,
+          }),
+        );
+      }
+      return materialCache.get(cacheKey)!;
+    }
+
+    const cacheKey = `plain:${FACE_COLORS[key]}`;
+    if (!materialCache.has(cacheKey)) {
       materialCache.set(
-        key,
+        cacheKey,
         new THREE.MeshStandardMaterial({
-          color: "#111111",
+          color: FACE_COLORS[key],
           roughness: 0.25,
           metalness: 0,
-          depthWrite: false, // inner faces never need to win the depth test
         }),
       );
     }
-    return materialCache.get(key)!;
-  }
-
-  if (portrait && slice) {
-    const key = `img:${color}:${slice.join(",")}`;
-    if (!materialCache.has(key)) {
-      const canvas = buildFaceCanvas(color, portrait, slice);
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.needsUpdate = true;
-      materialCache.set(
-        key,
-        new THREE.MeshStandardMaterial({
-          map: tex,
-          roughness: 0.25,
-          metalness: 0,
-          depthWrite: false, // sticker sits on top of body; skip depth writes
-          polygonOffset: true,
-          polygonOffsetFactor: -1,
-          polygonOffsetUnits: -1,
-        }),
-      );
-    }
-    return materialCache.get(key)!;
-  }
-
-  const key = `plain:${color}`;
-  if (!materialCache.has(key)) {
-    materialCache.set(
-      key,
-      new THREE.MeshStandardMaterial({
-        color,
-        roughness: 0.25,
-        metalness: 0,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-      }),
-    );
-  }
-  return materialCache.get(key)!;
+    return materialCache.get(cacheKey)!;
+  });
 }
 
 let sharedBodyMaterial: THREE.MeshStandardMaterial | null = null;
@@ -187,18 +208,17 @@ function getBodyMaterial() {
       color: "#111111",
       roughness: 0.5,
       metalness: 0,
-      // Body DOES write depth — it is the base surface
     });
   }
   return sharedBodyMaterial;
 }
 
-let sharedBoxGeometry: THREE.BoxGeometry | null = null;
-function getBoxGeometry() {
-  if (!sharedBoxGeometry) {
-    sharedBoxGeometry = new THREE.BoxGeometry(0.97, 0.97, 0.97);
+let sharedPlaneGeometry: THREE.PlaneGeometry | null = null;
+function getPlaneGeometry() {
+  if (!sharedPlaneGeometry) {
+    sharedPlaneGeometry = new THREE.PlaneGeometry(0.93, 0.93);
   }
-  return sharedBoxGeometry;
+  return sharedPlaneGeometry;
 }
 
 export default function PuzzlePiece({
@@ -209,20 +229,26 @@ export default function PuzzlePiece({
   origZ,
 }: Props) {
   const texture = useLoader(TextureLoader, "/portrait.jpg");
-  const stickerRef = useRef<THREE.Mesh>(null);
+
+  // Store materials in a ref so they are never recomputed after first build.
+  // This prevents the black-flash caused by useMemo re-running mid-animation.
+  const materialsRef = useRef<(THREE.MeshStandardMaterial | null)[] | null>(
+    null,
+  );
+  const meshRefs = useRef<(THREE.Mesh | null)[]>([]);
 
   useEffect(() => {
-    const mesh = stickerRef.current;
-    if (!mesh) return;
     const portrait = texture.image as HTMLImageElement | null;
-    const mats = FACE_DEFS.map(({ axis, dir, key }) => {
-      const outer = isOuter(axis, dir, origX, origY, origZ);
-      const slice = outer
-        ? getPortraitSlice(axis, dir, origX, origY, origZ)
-        : null;
-      return getCachedMaterial(FACE_COLORS[key], portrait, slice, outer);
+    if (!portrait || !portrait.complete || portrait.naturalWidth === 0) return;
+    if (materialsRef.current) return; // already built — never rebuild
+
+    materialsRef.current = buildMaterials(origX, origY, origZ, portrait);
+
+    // Apply to meshes immediately
+    materialsRef.current.forEach((mat, i) => {
+      const mesh = meshRefs.current[i];
+      if (mesh && mat) mesh.material = mat;
     });
-    mesh.material = mats;
   }, [texture, origX, origY, origZ]);
 
   return (
@@ -235,20 +261,23 @@ export default function PuzzlePiece({
         receiveShadow={false}
         material={getBodyMaterial()}
       />
-      {/*
-        renderOrder={1} ensures this draws after the body in the same pass.
-        depthWrite=false (set on every material above) means it never occludes
-        itself or neighbouring cubies — it just composites on top of whatever
-        the depth buffer already accepted. Combined with polygonOffset this
-        eliminates the z-fighting black flash entirely, even mid-rotation.
-      */}
-      <mesh
-        ref={stickerRef}
-        geometry={getBoxGeometry()}
-        renderOrder={1}
-        castShadow={false}
-        receiveShadow={false}
-      />
+      {FACE_DEFS.map(({ axis, dir, key, rotation, offset }, i) => {
+        const outer = isOuter(axis, dir, origX, origY, origZ);
+        if (!outer) return null;
+        return (
+          <mesh
+            key={key}
+            ref={(el) => {
+              meshRefs.current[i] = el;
+            }}
+            geometry={getPlaneGeometry()}
+            position={offset}
+            rotation={rotation}
+            castShadow={false}
+            receiveShadow={false}
+          />
+        );
+      })}
     </group>
   );
 }
