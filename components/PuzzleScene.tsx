@@ -21,7 +21,7 @@ interface PuzzleSceneProps {
 export default function PuzzleScene({ puzzleRef }: PuzzleSceneProps) {
   return (
     <Canvas
-      camera={{ position: [6, 4, 11], fov: 38 }}
+      camera={{ position: [6, 4, 11], fov: 55 }}
       shadows="soft"
       gl={{
         antialias: true,

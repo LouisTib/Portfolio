@@ -3,6 +3,7 @@
 import { useRef, useState, useEffect } from "react";
 import PuzzleScene from "@/components/PuzzleScene";
 import { PuzzleHandle } from "@/components/Puzzle";
+import { preloadCubeAssets } from "@/lib/cubeAssets";
 
 function IconMail() {
   return (
@@ -113,6 +114,7 @@ function IconRefresh() {
 export default function Home() {
   const puzzleRef = useRef<PuzzleHandle>(null);
   const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     let raf: number;
@@ -122,6 +124,27 @@ export default function Home() {
     }
     raf = requestAnimationFrame(poll);
     return () => cancelAnimationFrame(raf);
+  }, []);
+
+  // Don't kick off the intro animation until the cube's textures/materials
+  // are built, so the heavy canvas work doesn't stall the fall-in transition.
+  useEffect(() => {
+    let cancelled = false;
+    const fallback = setTimeout(() => {
+      if (!cancelled) setReady(true);
+    }, 1500);
+
+    preloadCubeAssets().then(() => {
+      if (!cancelled) {
+        clearTimeout(fallback);
+        setReady(true);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      clearTimeout(fallback);
+    };
   }, []);
 
   const iconBtnStyle: React.CSSProperties = {
@@ -145,156 +168,160 @@ export default function Home() {
     >
       <PuzzleScene puzzleRef={puzzleRef} />
 
-      <div className="absolute inset-0 pointer-events-none">
-        {/* TOP LEFT */}
-        <div
-          className="absolute top-8 left-8 text-black fall-in"
-          style={{ animationDelay: "0ms" }}
-        >
-          <h1
-            style={{
-              fontFamily: "var(--font-geist-sans), Arial, sans-serif",
-              fontSize: "2rem",
-              fontWeight: 700,
-              letterSpacing: "-0.02em",
-              lineHeight: 1,
-            }}
+      {ready && (
+        <div className="absolute inset-0 pointer-events-none">
+          {/* TOP LEFT */}
+          <div
+            className="absolute top-8 left-8 text-black fall-in"
+            style={{ animationDelay: "0ms" }}
           >
-            LOUIS TIBOLDO
-          </h1>
-          <p
-            style={{
-              fontFamily: "var(--font-geist-mono), monospace",
-              fontSize: "0.7rem",
-              letterSpacing: "0.12em",
-              color: "rgba(0,0,0,0.5)",
-              marginTop: "6px",
-              textTransform: "uppercase",
-            }}
+            <h1
+              style={{
+                fontFamily: "var(--font-geist-sans), Arial, sans-serif",
+                fontSize: "2rem",
+                fontWeight: 700,
+                letterSpacing: "-0.02em",
+                lineHeight: 1,
+              }}
+            >
+              LOUIS TIBOLDO
+            </h1>
+            <p
+              style={{
+                fontFamily: "var(--font-geist-mono), monospace",
+                fontSize: "0.7rem",
+                letterSpacing: "0.12em",
+                color: "rgba(0,0,0,0.5)",
+                marginTop: "6px",
+                textTransform: "uppercase",
+              }}
+            >
+              MAKER&nbsp;•&nbsp;ENGINEER&nbsp;•&nbsp;INVENTOR
+            </p>
+            <div className="flex gap-2 mt-4 pointer-events-auto">
+              {[
+                { href: "mailto:you@example.com", icon: <IconMail /> },
+                { href: "https://linkedin.com", icon: <IconLinkedIn /> },
+                { href: "https://github.com", icon: <IconGitHub /> },
+                { href: "https://instagram.com", icon: <IconInstagram /> },
+              ].map(({ href, icon }, i) => (
+                <a
+                  key={i}
+                  href={href}
+                  target={href.startsWith("mailto") ? undefined : "_blank"}
+                  rel="noopener noreferrer"
+                  style={{
+                    ...iconBtnStyle,
+                    animationDelay: `${120 + i * 60}ms`,
+                  }}
+                  className="fall-in"
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.backgroundColor =
+                      "rgba(0,0,0,0.08)";
+                    (e.currentTarget as HTMLElement).style.color = "black";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.backgroundColor =
+                      "rgba(255,255,255,0.6)";
+                    (e.currentTarget as HTMLElement).style.color =
+                      "rgba(0,0,0,0.65)";
+                  }}
+                >
+                  {icon}
+                </a>
+              ))}
+            </div>
+          </div>
+
+          {/* BOTTOM CONTROLS */}
+          <div
+            className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-auto fall-in"
+            style={{ animationDelay: "200ms" }}
           >
-            MAKER&nbsp;•&nbsp;ENGINEER&nbsp;•&nbsp;INVENTOR
-          </p>
-          <div className="flex gap-2 mt-4 pointer-events-auto">
-            {[
-              { href: "mailto:you@example.com", icon: <IconMail /> },
-              { href: "https://linkedin.com", icon: <IconLinkedIn /> },
-              { href: "https://github.com", icon: <IconGitHub /> },
-              { href: "https://instagram.com", icon: <IconInstagram /> },
-            ].map(({ href, icon }, i) => (
-              <a
-                key={i}
-                href={href}
-                target={href.startsWith("mailto") ? undefined : "_blank"}
-                rel="noopener noreferrer"
-                style={{
-                  ...iconBtnStyle,
-                  animationDelay: `${120 + i * 60}ms`,
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  if (!busy) puzzleRef.current?.shuffle();
                 }}
-                className="fall-in"
+                disabled={busy}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "10px 22px",
+                  borderRadius: 9999,
+                  backgroundColor: "#111",
+                  color: "#fff",
+                  border: "none",
+                  cursor: busy ? "not-allowed" : "pointer",
+                  fontSize: "0.875rem",
+                  fontWeight: 500,
+                  fontFamily: "var(--font-geist-sans), Arial, sans-serif",
+                  opacity: busy ? 0.45 : 1,
+                  transition: "opacity 0.15s",
+                }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.backgroundColor =
-                    "rgba(0,0,0,0.08)";
-                  (e.currentTarget as HTMLElement).style.color = "black";
+                  if (!busy)
+                    (e.currentTarget as HTMLElement).style.opacity = "0.8";
                 }}
                 onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.backgroundColor =
-                    "rgba(255,255,255,0.6)";
-                  (e.currentTarget as HTMLElement).style.color =
-                    "rgba(0,0,0,0.65)";
+                  if (!busy)
+                    (e.currentTarget as HTMLElement).style.opacity = "1";
                 }}
               >
-                {icon}
-              </a>
-            ))}
-          </div>
-        </div>
+                <IconShuffle />
+                Shuffle
+              </button>
 
-        {/* BOTTOM CONTROLS */}
-        <div
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-auto fall-in"
-          style={{ animationDelay: "200ms" }}
-        >
-          <div className="flex gap-3">
-            <button
-              onClick={() => {
-                if (!busy) puzzleRef.current?.shuffle();
-              }}
-              disabled={busy}
+              <button
+                onClick={() => {
+                  if (!busy) puzzleRef.current?.solve();
+                }}
+                disabled={busy}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "10px 22px",
+                  borderRadius: 9999,
+                  backgroundColor: "#fff",
+                  color: "#111",
+                  border: "1px solid rgba(0,0,0,0.15)",
+                  cursor: busy ? "not-allowed" : "pointer",
+                  fontSize: "0.875rem",
+                  fontWeight: 500,
+                  fontFamily: "var(--font-geist-sans), Arial, sans-serif",
+                  opacity: busy ? 0.45 : 1,
+                  transition: "opacity 0.15s",
+                }}
+                onMouseEnter={(e) => {
+                  if (!busy)
+                    (e.currentTarget as HTMLElement).style.opacity = "0.8";
+                }}
+                onMouseLeave={(e) => {
+                  if (!busy)
+                    (e.currentTarget as HTMLElement).style.opacity = "1";
+                }}
+              >
+                <IconRefresh />
+                Solve
+              </button>
+            </div>
+
+            <p
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 22px",
-                borderRadius: 9999,
-                backgroundColor: "#111",
-                color: "#fff",
-                border: "none",
-                cursor: busy ? "not-allowed" : "pointer",
-                fontSize: "0.875rem",
-                fontWeight: 500,
-                fontFamily: "var(--font-geist-sans), Arial, sans-serif",
-                opacity: busy ? 0.45 : 1,
-                transition: "opacity 0.15s",
-              }}
-              onMouseEnter={(e) => {
-                if (!busy)
-                  (e.currentTarget as HTMLElement).style.opacity = "0.8";
-              }}
-              onMouseLeave={(e) => {
-                if (!busy) (e.currentTarget as HTMLElement).style.opacity = "1";
+                fontSize: "0.65rem",
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: "rgba(0,0,0,0.4)",
+                fontFamily: "var(--font-geist-mono), monospace",
               }}
             >
-              <IconShuffle />
-              Shuffle
-            </button>
-
-            <button
-              onClick={() => {
-                if (!busy) puzzleRef.current?.solve();
-              }}
-              disabled={busy}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 22px",
-                borderRadius: 9999,
-                backgroundColor: "#fff",
-                color: "#111",
-                border: "1px solid rgba(0,0,0,0.15)",
-                cursor: busy ? "not-allowed" : "pointer",
-                fontSize: "0.875rem",
-                fontWeight: 500,
-                fontFamily: "var(--font-geist-sans), Arial, sans-serif",
-                opacity: busy ? 0.45 : 1,
-                transition: "opacity 0.15s",
-              }}
-              onMouseEnter={(e) => {
-                if (!busy)
-                  (e.currentTarget as HTMLElement).style.opacity = "0.8";
-              }}
-              onMouseLeave={(e) => {
-                if (!busy) (e.currentTarget as HTMLElement).style.opacity = "1";
-              }}
-            >
-              <IconRefresh />
-              Solve
-            </button>
+              DRAG TO ROTATE&nbsp;•&nbsp;SCROLL TO ZOOM
+            </p>
           </div>
-
-          <p
-            style={{
-              fontSize: "0.65rem",
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              color: "rgba(0,0,0,0.4)",
-              fontFamily: "var(--font-geist-mono), monospace",
-            }}
-          >
-            DRAG TO ROTATE&nbsp;•&nbsp;SCROLL TO ZOOM
-          </p>
         </div>
-      </div>
+      )}
     </main>
   );
 }
