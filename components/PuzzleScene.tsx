@@ -21,7 +21,7 @@ interface PuzzleSceneProps {
 export default function PuzzleScene({ puzzleRef }: PuzzleSceneProps) {
   return (
     <Canvas
-      camera={{ position: [9, 7, 9], fov: 38 }}
+      camera={{ position: [6, 4, 11], fov: 38 }}
       shadows="soft"
       gl={{
         antialias: true,
@@ -29,10 +29,8 @@ export default function PuzzleScene({ puzzleRef }: PuzzleSceneProps) {
         toneMappingExposure: 1.1,
       }}
     >
-      {/* Ambient fill */}
       <ambientLight intensity={0.55} />
 
-      {/* Key light — top right front, warm */}
       <directionalLight
         position={[6, 10, 6]}
         intensity={2.2}
@@ -48,24 +46,20 @@ export default function PuzzleScene({ puzzleRef }: PuzzleSceneProps) {
         color="#fff8f0"
       />
 
-      {/* Fill light — left, cool blue */}
       <directionalLight
         position={[-5, 3, -4]}
         intensity={0.5}
         color="#c0d8ff"
       />
 
-      {/* Rim light — back top, subtle */}
       <directionalLight
         position={[0, 6, -8]}
         intensity={0.35}
         color="#ffffff"
       />
 
-      {/* Soft ground bounce */}
       <pointLight position={[0, -4, 0]} intensity={0.3} color="#ffe8c0" />
 
-      {/* HDRI-style environment for reflections on the glossy stickers */}
       <Environment preset="city" />
 
       <Suspense fallback={null}>
@@ -79,8 +73,8 @@ export default function PuzzleScene({ puzzleRef }: PuzzleSceneProps) {
         enablePan={false}
         minDistance={5}
         maxDistance={18}
-        minPolarAngle={0} // was Math.PI / 6 — now allows full top-down view
-        maxPolarAngle={Math.PI} // was Math.PI / 1.8 — now allows full bottom view
+        minPolarAngle={0}
+        maxPolarAngle={Math.PI}
       />
     </Canvas>
   );

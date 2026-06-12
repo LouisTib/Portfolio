@@ -11,7 +11,7 @@ export type Move = {
   dir: 1 | -1;
 };
 
-const SPACING = 1.004;
+const SPACING = 1.0005;
 const TARGET = Math.PI / 2;
 const SPEED = 4.2;
 
@@ -89,6 +89,7 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
 
   // Scratch objects — allocated once, reused every frame
   const _q = new THREE.Quaternion();
+  const _qSpin = new THREE.Quaternion();
   const _axisVec = new THREE.Vector3();
   const _rot = new THREE.Matrix4();
 
@@ -107,7 +108,8 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
     shuffle() {
       if (busy.current) return;
       const moves = randomMoves(20);
-      history.current = [...moves].reverse().map(inv);
+      // Prepend this shuffle's undo moves so prior shuffles can still be solved
+      history.current = [...moves].reverse().map(inv).concat(history.current);
       queue.current = moves;
       busy.current = true;
       startNextMove();
@@ -132,7 +134,14 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
     const t = Math.min(elapsed.current / TARGET, 1);
     const angle = ease(t) * TARGET * move.dir;
 
-    // Rotate every cubie in the active layer directly via its ref
+    // Build the incremental spin quaternion for this frame's angle
+    _axisVec.set(
+      move.axis === "x" ? 1 : 0,
+      move.axis === "y" ? 1 : 0,
+      move.axis === "z" ? 1 : 0,
+    );
+    _qSpin.setFromAxisAngle(_axisVec, angle);
+
     for (const c of cubies.current) {
       const coord = move.axis === "x" ? c.x : move.axis === "y" ? c.y : c.z;
       if (coord !== move.layer) continue;
@@ -140,31 +149,33 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
       const groupEl = cubieRefs.current[c.id];
       if (!groupEl) continue;
 
-      // Base position
+      // Base (rest) position for this cubie
       const bx = (c.x - 1) * SPACING;
       const by = (c.y - 1) * SPACING;
       const bz = (c.z - 1) * SPACING;
 
+      // Rotate the rest position around the layer axis
       if (move.axis === "x") {
         const cosA = Math.cos(angle),
           sinA = Math.sin(angle);
         groupEl.position.set(bx, by * cosA - bz * sinA, by * sinA + bz * cosA);
-        groupEl.rotation.set(angle, 0, 0);
       } else if (move.axis === "y") {
         const cosA = Math.cos(angle),
           sinA = Math.sin(angle);
         groupEl.position.set(bx * cosA + bz * sinA, by, -bx * sinA + bz * cosA);
-        groupEl.rotation.set(0, angle, 0);
       } else {
         const cosA = Math.cos(angle),
           sinA = Math.sin(angle);
         groupEl.position.set(bx * cosA - by * sinA, bx * sinA + by * cosA, bz);
-        groupEl.rotation.set(0, 0, angle);
       }
+
+      // Compose spin on top of the accumulated orientation — NEVER touch .rotation
+      _q.setFromRotationMatrix(c.matrix);
+      groupEl.quaternion.copy(_qSpin).multiply(_q);
     }
 
     if (t >= 1) {
-      // Snap: bake rotation into each cubie's matrix and reset to resting position
+      // Snap: bake final rotation into each cubie's matrix and reset to rest
       _axisVec.set(
         move.axis === "x" ? 1 : 0,
         move.axis === "y" ? 1 : 0,
@@ -194,7 +205,7 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
         // Bake into accumulated matrix
         c.matrix = _rot.clone().multiply(c.matrix);
 
-        // Reset the group to its new resting transform
+        // Reset group to new resting transform — quaternion only, no .rotation
         const groupEl = cubieRefs.current[c.id];
         if (groupEl) {
           groupEl.position.set(
@@ -202,8 +213,6 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
             (c.y - 1) * SPACING,
             (c.z - 1) * SPACING,
           );
-          groupEl.rotation.set(0, 0, 0);
-          // Apply accumulated orientation
           _q.setFromRotationMatrix(c.matrix);
           groupEl.quaternion.copy(_q);
         }

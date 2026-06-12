@@ -73,23 +73,6 @@ function IconInstagram() {
     </svg>
   );
 }
-function IconYouTube() {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M22.54 6.42a2.78 2.78 0 0 0-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46A2.78 2.78 0 0 0 1.46 6.42 29 29 0 0 0 1 12a29 29 0 0 0 .46 5.58 2.78 2.78 0 0 0 1.95 1.96C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 0 0 1.96-1.96A29 29 0 0 0 23 12a29 29 0 0 0-.46-5.58z" />
-      <polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02" />
-    </svg>
-  );
-}
 function IconShuffle() {
   return (
     <svg
@@ -164,7 +147,10 @@ export default function Home() {
 
       <div className="absolute inset-0 pointer-events-none">
         {/* TOP LEFT */}
-        <div className="absolute top-8 left-8 text-black">
+        <div
+          className="absolute top-8 left-8 text-black fall-in"
+          style={{ animationDelay: "0ms" }}
+        >
           <h1
             style={{
               fontFamily: "var(--font-geist-sans), Arial, sans-serif",
@@ -194,14 +180,17 @@ export default function Home() {
               { href: "https://linkedin.com", icon: <IconLinkedIn /> },
               { href: "https://github.com", icon: <IconGitHub /> },
               { href: "https://instagram.com", icon: <IconInstagram /> },
-              { href: "https://youtube.com", icon: <IconYouTube /> },
             ].map(({ href, icon }, i) => (
               <a
                 key={i}
                 href={href}
                 target={href.startsWith("mailto") ? undefined : "_blank"}
                 rel="noopener noreferrer"
-                style={iconBtnStyle}
+                style={{
+                  ...iconBtnStyle,
+                  animationDelay: `${120 + i * 60}ms`,
+                }}
+                className="fall-in"
                 onMouseEnter={(e) => {
                   (e.currentTarget as HTMLElement).style.backgroundColor =
                     "rgba(0,0,0,0.08)";
@@ -221,9 +210,11 @@ export default function Home() {
         </div>
 
         {/* BOTTOM CONTROLS */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-auto">
+        <div
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-auto fall-in"
+          style={{ animationDelay: "200ms" }}
+        >
           <div className="flex gap-3">
-            {/* Shuffle — dark */}
             <button
               onClick={() => {
                 if (!busy) puzzleRef.current?.shuffle();
@@ -257,7 +248,6 @@ export default function Home() {
               Shuffle
             </button>
 
-            {/* Solve — white (original style, never changes) */}
             <button
               onClick={() => {
                 if (!busy) puzzleRef.current?.solve();
