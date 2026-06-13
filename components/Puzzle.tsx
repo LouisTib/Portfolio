@@ -27,6 +27,12 @@ const SPEED = 4.2;
 const INTRO_STAGGER = 0.09; // seconds between each cubie starting
 const INTRO_DURATION = 2.2; // how long each individual cubie takes to arrive
 
+// Total wall-clock time (in seconds) for the full intro animation to finish —
+// i.e. the moment the last (most-delayed) cubie arrives at its home position.
+// Exported so other UI (e.g. the page header/footer text) can sync its own
+// entrance animation to land right as this completes.
+export const INTRO_TOTAL_DURATION = 26 * INTRO_STAGGER + INTRO_DURATION;
+
 // ─── Easing ──────────────────────────────────────────────────────────────────
 // easeOutQuart — smooth deceleration, zero bounce/overshoot (Lego-style)
 function easeOutQuart(t: number): number {
@@ -76,7 +82,9 @@ export interface PuzzleHandle {
   shuffle: () => void;
   solve: () => void;
   explode: () => void;
+  condense: () => void;
   isBusy: () => boolean;
+  isExploded: () => boolean;
 }
 
 // ─── Random off-screen spawn positions ───────────────────────────────────────
@@ -200,12 +208,21 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
   // phases: 'idle' | 'out' | 'hang' | 'in'
   const explodePhase = useRef<"idle" | "out" | "hang" | "in">("idle");
   const explodeElapsed = useRef(0);
-  // Per-cubie explode target positions (outward from cube center)
+  // Per-cubie explode target positions (randomised scatter from cube center)
   const explodeTargets = useRef<THREE.Vector3[]>([]);
+  // Per-cubie random spin axis/speed while exploded
+  const explodeSpinAxes = useRef<THREE.Vector3[]>([]);
+  const explodeSpinSpeeds = useRef<number[]>([]);
+  // Accumulated spin quaternion (relative to the cubie's resting orientation)
+  const explodeSpinQuat = useRef<THREE.Quaternion[]>([]);
+  // Each cubie's resting orientation at the moment explode was triggered
+  const explodeBaseQuat = useRef<THREE.Quaternion[]>([]);
+  // Snapshot of the spin quaternion at the start of the "in" phase, so it
+  // can be slerped back to rest as the cubie flies home
+  const explodeInStartQuat = useRef<THREE.Quaternion[]>([]);
 
-  const EXPLODE_OUT_DUR = 0.55; // seconds to blast outward
-  const EXPLODE_HANG_DUR = 0.55; // seconds to hang at peak
-  const EXPLODE_IN_DUR = 0.9; // seconds to implode back
+  const EXPLODE_OUT_DUR = 0.6; // seconds to scatter outward
+  const EXPLODE_IN_DUR = 0.9; // seconds to return home
 
   function easeOutCubic(t: number) {
     return 1 - Math.pow(1 - t, 3);
@@ -238,6 +255,9 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
   const _axisVec = new THREE.Vector3();
   const _rot = new THREE.Matrix4();
   const _tmp = new THREE.Vector3();
+  const _dq = new THREE.Quaternion();
+  const _slerpQuat = new THREE.Quaternion();
+  const _identityQuat = new THREE.Quaternion();
 
   const startNextMove = useCallback(() => {
     if (queue.current.length === 0) {
@@ -268,29 +288,111 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
     explode() {
       if (busy.current || !introDone.current || explodePhase.current !== "idle")
         return;
-      // Build outward target for each cubie: direction from cube center,
-      // scaled so edge/corner cubies go further than face cubies.
-      explodeTargets.current = cubies.current.map((c) => {
-        const dx = (c.x - 1) * SPACING;
-        const dy = (c.y - 1) * SPACING;
-        const dz = (c.z - 1) * SPACING;
-        const dir = new THREE.Vector3(dx, dy, dz);
-        // Centre cubie has no direction — give it a little upward pop
-        if (dir.lengthSq() < 0.001) dir.set(0, 1, 0);
-        dir.normalize();
-        const dist = 2.8 + Math.sqrt(dx * dx + dy * dy + dz * dz) * 0.9;
-        return new THREE.Vector3(
-          dx + dir.x * dist,
-          dy + dir.y * dist,
-          dz + dir.z * dist,
+
+      explodeTargets.current = [];
+      explodeSpinAxes.current = [];
+      explodeSpinSpeeds.current = [];
+      explodeSpinQuat.current = [];
+      explodeBaseQuat.current = [];
+      explodeInStartQuat.current = [];
+
+      for (const c of cubies.current) {
+        const home = new THREE.Vector3(
+          (c.x - 1) * SPACING,
+          (c.y - 1) * SPACING,
+          (c.z - 1) * SPACING,
         );
-      });
+
+        // Mostly-radial direction with extra jitter so the scatter reads as
+        // organic/random rather than a perfectly even robotic burst.
+        const dir = new THREE.Vector3(
+          home.x + (Math.random() - 0.5) * 1.8,
+          home.y + (Math.random() - 0.5) * 1.8,
+          home.z + (Math.random() - 0.5) * 1.8,
+        );
+        if (dir.lengthSq() < 0.0001) {
+          dir.set(
+            Math.random() - 0.5,
+            Math.random() - 0.5,
+            Math.random() - 0.5,
+          );
+        }
+        dir.normalize();
+
+        const dist = 2.2 + Math.random() * 2.8;
+        explodeTargets.current.push(home.clone().add(dir.multiplyScalar(dist)));
+
+        // Random spin axis + slow angular speed (rad/s), random direction
+        const axis = new THREE.Vector3(
+          Math.random() - 0.5,
+          Math.random() - 0.5,
+          Math.random() - 0.5,
+        );
+        if (axis.lengthSq() < 0.0001) axis.set(0, 1, 0);
+        axis.normalize();
+        explodeSpinAxes.current.push(axis);
+        explodeSpinSpeeds.current.push(
+          (0.35 + Math.random() * 0.75) * (Math.random() < 0.5 ? -1 : 1),
+        );
+
+        explodeSpinQuat.current.push(new THREE.Quaternion());
+        explodeInStartQuat.current.push(new THREE.Quaternion());
+
+        _q.setFromRotationMatrix(c.matrix);
+        explodeBaseQuat.current.push(_q.clone());
+      }
+
+      // Relax target positions apart so cubies don't end up overlapping
+      // each other (which reads as "going into" one another mid-air).
+      const MIN_SEP = 1.2; // a cubie is ~1 unit across, give a little buffer
+      for (let iter = 0; iter < 8; iter++) {
+        for (let i = 0; i < explodeTargets.current.length; i++) {
+          for (let j = i + 1; j < explodeTargets.current.length; j++) {
+            const a = explodeTargets.current[i];
+            const b = explodeTargets.current[j];
+            const diff = a.clone().sub(b);
+            const dist = diff.length();
+            if (dist < 1e-4) {
+              const jitter = new THREE.Vector3(
+                Math.random() - 0.5,
+                Math.random() - 0.5,
+                Math.random() - 0.5,
+              )
+                .normalize()
+                .multiplyScalar(MIN_SEP / 2);
+              a.add(jitter);
+              b.sub(jitter);
+            } else if (dist < MIN_SEP) {
+              const push = diff
+                .normalize()
+                .multiplyScalar((MIN_SEP - dist) / 2);
+              a.add(push);
+              b.sub(push);
+            }
+          }
+        }
+      }
+
       explodeElapsed.current = 0;
       explodePhase.current = "out";
       busy.current = true;
     },
+    condense() {
+      // Only meaningful while the pieces are hanging out in their
+      // exploded/expanded state.
+      if (explodePhase.current !== "hang") return;
+      for (const c of cubies.current) {
+        explodeInStartQuat.current[c.id].copy(explodeSpinQuat.current[c.id]);
+      }
+      explodeElapsed.current = 0;
+      explodePhase.current = "in";
+      busy.current = true;
+    },
     isBusy() {
       return busy.current || !introDone.current;
+    },
+    isExploded() {
+      return explodePhase.current === "hang";
     },
   }));
 
@@ -370,16 +472,41 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
           );
           _tmp.lerpVectors(home, explodeTargets.current[c.id], et);
           groupEl.position.copy(_tmp);
+
+          // Slowly accumulate a random spin as the cubie flies outward
+          _dq.setFromAxisAngle(
+            explodeSpinAxes.current[c.id],
+            explodeSpinSpeeds.current[c.id] * dt,
+          );
+          explodeSpinQuat.current[c.id].premultiply(_dq);
+          groupEl.quaternion
+            .copy(explodeBaseQuat.current[c.id])
+            .multiply(explodeSpinQuat.current[c.id]);
         }
         if (t >= 1) {
           explodePhase.current = "hang";
           explodeElapsed.current = 0;
+          // Pieces now sit in their expanded state until the user chooses
+          // to condense them back — release "busy" so the Condense button
+          // (and isExploded()) become available.
+          busy.current = false;
         }
       } else if (explodePhase.current === "hang") {
-        if (explodeElapsed.current >= EXPLODE_HANG_DUR) {
-          explodePhase.current = "in";
-          explodeElapsed.current = 0;
+        for (const c of cubies.current) {
+          const groupEl = cubieRefs.current[c.id];
+          if (!groupEl) continue;
+          // Keep slowly spinning in place while hanging at the peak
+          _dq.setFromAxisAngle(
+            explodeSpinAxes.current[c.id],
+            explodeSpinSpeeds.current[c.id] * dt,
+          );
+          explodeSpinQuat.current[c.id].premultiply(_dq);
+          groupEl.quaternion
+            .copy(explodeBaseQuat.current[c.id])
+            .multiply(explodeSpinQuat.current[c.id]);
         }
+        // Stays in "hang" indefinitely — condense() (triggered by the user)
+        // is what kicks off the "in" phase.
       } else if (explodePhase.current === "in") {
         const t = Math.min(explodeElapsed.current / EXPLODE_IN_DUR, 1);
         const et = easeInOutQuart(t);
@@ -393,17 +520,27 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
           );
           _tmp.lerpVectors(explodeTargets.current[c.id], home, et);
           groupEl.position.copy(_tmp);
+
+          // Ease the spin back to the cubie's resting orientation as it
+          // returns home, so it settles in clean rather than snapping.
+          _slerpQuat.copy(explodeInStartQuat.current[c.id]);
+          _slerpQuat.slerp(_identityQuat, et);
+          groupEl.quaternion
+            .copy(explodeBaseQuat.current[c.id])
+            .multiply(_slerpQuat);
         }
         if (t >= 1) {
           // Snap home and clear
           for (const c of cubies.current) {
             const groupEl = cubieRefs.current[c.id];
-            if (groupEl)
+            if (groupEl) {
               groupEl.position.set(
                 (c.x - 1) * SPACING,
                 (c.y - 1) * SPACING,
                 (c.z - 1) * SPACING,
               );
+              groupEl.quaternion.copy(explodeBaseQuat.current[c.id]);
+            }
           }
           explodePhase.current = "idle";
           busy.current = false;

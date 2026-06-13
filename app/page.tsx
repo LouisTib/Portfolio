@@ -2,7 +2,7 @@
 
 import { useRef, useState, useEffect } from "react";
 import PuzzleScene from "@/components/PuzzleScene";
-import { PuzzleHandle } from "@/components/Puzzle";
+import { PuzzleHandle, INTRO_TOTAL_DURATION } from "@/components/Puzzle";
 
 function IconMail() {
   return (
@@ -125,19 +125,57 @@ function IconExplode() {
     </svg>
   );
 }
+function IconCondense() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />
+    </svg>
+  );
+}
 
 export default function Home() {
   const puzzleRef = useRef<PuzzleHandle>(null);
   const [busy, setBusy] = useState(false);
+  const [exploded, setExploded] = useState(false);
+  const [showText, setShowText] = useState(false);
 
   useEffect(() => {
     let raf: number;
     function poll() {
       setBusy(puzzleRef.current?.isBusy() ?? false);
+      setExploded(puzzleRef.current?.isExploded() ?? false);
       raf = requestAnimationFrame(poll);
     }
     raf = requestAnimationFrame(poll);
     return () => cancelAnimationFrame(raf);
+  }, []);
+
+  useEffect(() => {
+    // If the user prefers reduced motion, skip the wait entirely so the
+    // text isn't hidden for several seconds without an animation to justify it.
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (prefersReducedMotion) {
+      setShowText(true);
+      return;
+    }
+
+    // Trigger the text fall-in right as the last cube is finishing its
+    // drop-in animation (slightly early so the two feel connected).
+    const ms = Math.max(0, INTRO_TOTAL_DURATION * 1000 - 250);
+    const t = setTimeout(() => setShowText(true), ms);
+    return () => clearTimeout(t);
   }, []);
 
   const iconBtnStyle: React.CSSProperties = {
@@ -154,7 +192,7 @@ export default function Home() {
     transition: "all 0.15s ease",
   };
 
-  const pillBtn = (dark: boolean): React.CSSProperties => ({
+  const pillBtn = (dark: boolean, disabled: boolean): React.CSSProperties => ({
     display: "flex",
     alignItems: "center",
     gap: 8,
@@ -163,20 +201,22 @@ export default function Home() {
     backgroundColor: dark ? "#111" : "#fff",
     color: dark ? "#fff" : "#111",
     border: dark ? "none" : "1px solid rgba(0,0,0,0.15)",
-    cursor: busy ? "not-allowed" : "pointer",
+    cursor: disabled ? "not-allowed" : "pointer",
     fontSize: "0.875rem",
     fontWeight: 500,
     fontFamily: "var(--font-geist-sans), Arial, sans-serif",
-    opacity: busy ? 0.45 : 1,
+    opacity: disabled ? 0.45 : 1,
     transition: "opacity 0.15s",
   });
 
-  const hoverDim = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (!busy) (e.currentTarget as HTMLElement).style.opacity = "0.8";
-  };
-  const hoverReset = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (!busy) (e.currentTarget as HTMLElement).style.opacity = "1";
-  };
+  const hoverDim =
+    (disabled: boolean) => (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (!disabled) (e.currentTarget as HTMLElement).style.opacity = "0.8";
+    };
+  const hoverReset =
+    (disabled: boolean) => (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (!disabled) (e.currentTarget as HTMLElement).style.opacity = "1";
+    };
 
   return (
     <main
@@ -188,8 +228,8 @@ export default function Home() {
       <div className="absolute inset-0 pointer-events-none">
         {/* TOP LEFT */}
         <div
-          className="absolute top-8 left-8 text-black fall-in"
-          style={{ animationDelay: "0ms" }}
+          className={`absolute top-8 left-8 text-black ${showText ? "fall-in" : ""}`}
+          style={{ animationDelay: "0ms", opacity: showText ? undefined : 0 }}
         >
           <h1
             style={{
@@ -212,22 +252,32 @@ export default function Home() {
               textTransform: "uppercase",
             }}
           >
-            MAKER&nbsp;•&nbsp;ENGINEER&nbsp;•&nbsp;INVENTOR
+            SOFTWARE ENGINEER
           </p>
           <div className="flex gap-2 mt-4 pointer-events-auto">
             {[
-              { href: "mailto:you@example.com", icon: <IconMail /> },
-              { href: "https://linkedin.com", icon: <IconLinkedIn /> },
-              { href: "https://github.com", icon: <IconGitHub /> },
-              { href: "https://instagram.com", icon: <IconInstagram /> },
+              { href: "mailto:louistiboldo@gmail.com", icon: <IconMail /> },
+              {
+                href: "https://www.linkedin.com/in/louis-tiboldo-0a5422290",
+                icon: <IconLinkedIn />,
+              },
+              { href: "https://github.com/LouisTib", icon: <IconGitHub /> },
+              {
+                href: "https://www.instagram.com/louis_tib/",
+                icon: <IconInstagram />,
+              },
             ].map(({ href, icon }, i) => (
               <a
                 key={i}
                 href={href}
                 target={href.startsWith("mailto") ? undefined : "_blank"}
                 rel="noopener noreferrer"
-                style={{ ...iconBtnStyle, animationDelay: `${120 + i * 60}ms` }}
-                className="fall-in"
+                style={{
+                  ...iconBtnStyle,
+                  animationDelay: `${120 + i * 60}ms`,
+                  opacity: showText ? undefined : 0,
+                }}
+                className={showText ? "fall-in" : ""}
                 onMouseEnter={(e) => {
                   (e.currentTarget as HTMLElement).style.backgroundColor =
                     "rgba(0,0,0,0.08)";
@@ -248,18 +298,18 @@ export default function Home() {
 
         {/* BOTTOM CONTROLS */}
         <div
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-auto fall-in"
-          style={{ animationDelay: "200ms" }}
+          className={`absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-auto ${showText ? "fall-in" : ""}`}
+          style={{ animationDelay: "200ms", opacity: showText ? undefined : 0 }}
         >
           <div className="flex gap-3">
             <button
               onClick={() => {
-                if (!busy) puzzleRef.current?.shuffle();
+                if (!busy && !exploded) puzzleRef.current?.shuffle();
               }}
-              disabled={busy}
-              style={pillBtn(true)}
-              onMouseEnter={hoverDim}
-              onMouseLeave={hoverReset}
+              disabled={busy || exploded}
+              style={pillBtn(true, busy || exploded)}
+              onMouseEnter={hoverDim(busy || exploded)}
+              onMouseLeave={hoverReset(busy || exploded)}
             >
               <IconShuffle />
               Shuffle
@@ -267,12 +317,12 @@ export default function Home() {
 
             <button
               onClick={() => {
-                if (!busy) puzzleRef.current?.solve();
+                if (!busy && !exploded) puzzleRef.current?.solve();
               }}
-              disabled={busy}
-              style={pillBtn(false)}
-              onMouseEnter={hoverDim}
-              onMouseLeave={hoverReset}
+              disabled={busy || exploded}
+              style={pillBtn(false, busy || exploded)}
+              onMouseEnter={hoverDim(busy || exploded)}
+              onMouseLeave={hoverReset(busy || exploded)}
             >
               <IconRefresh />
               Solve
@@ -280,15 +330,20 @@ export default function Home() {
 
             <button
               onClick={() => {
-                if (!busy) puzzleRef.current?.explode();
+                if (busy) return;
+                if (exploded) {
+                  puzzleRef.current?.condense();
+                } else {
+                  puzzleRef.current?.explode();
+                }
               }}
               disabled={busy}
-              style={pillBtn(false)}
-              onMouseEnter={hoverDim}
-              onMouseLeave={hoverReset}
+              style={pillBtn(false, busy)}
+              onMouseEnter={hoverDim(busy)}
+              onMouseLeave={hoverReset(busy)}
             >
-              <IconExplode />
-              Explode
+              {exploded ? <IconCondense /> : <IconExplode />}
+              {exploded ? "Condense" : "Expand"}
             </button>
           </div>
 
