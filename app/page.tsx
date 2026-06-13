@@ -109,6 +109,22 @@ function IconRefresh() {
     </svg>
   );
 }
+function IconExplode() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+    </svg>
+  );
+}
 
 export default function Home() {
   const puzzleRef = useRef<PuzzleHandle>(null);
@@ -138,15 +154,37 @@ export default function Home() {
     transition: "all 0.15s ease",
   };
 
+  const pillBtn = (dark: boolean): React.CSSProperties => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "10px 22px",
+    borderRadius: 9999,
+    backgroundColor: dark ? "#111" : "#fff",
+    color: dark ? "#fff" : "#111",
+    border: dark ? "none" : "1px solid rgba(0,0,0,0.15)",
+    cursor: busy ? "not-allowed" : "pointer",
+    fontSize: "0.875rem",
+    fontWeight: 500,
+    fontFamily: "var(--font-geist-sans), Arial, sans-serif",
+    opacity: busy ? 0.45 : 1,
+    transition: "opacity 0.15s",
+  });
+
+  const hoverDim = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!busy) (e.currentTarget as HTMLElement).style.opacity = "0.8";
+  };
+  const hoverReset = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!busy) (e.currentTarget as HTMLElement).style.opacity = "1";
+  };
+
   return (
     <main
       style={{ backgroundColor: "#efefef" }}
       className="w-screen h-screen relative overflow-hidden"
     >
-      {/* Canvas mounts immediately — the stream animation is the intro */}
       <PuzzleScene puzzleRef={puzzleRef} />
 
-      {/* Text renders immediately alongside the cube stream */}
       <div className="absolute inset-0 pointer-events-none">
         {/* TOP LEFT */}
         <div
@@ -219,29 +257,9 @@ export default function Home() {
                 if (!busy) puzzleRef.current?.shuffle();
               }}
               disabled={busy}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 22px",
-                borderRadius: 9999,
-                backgroundColor: "#111",
-                color: "#fff",
-                border: "none",
-                cursor: busy ? "not-allowed" : "pointer",
-                fontSize: "0.875rem",
-                fontWeight: 500,
-                fontFamily: "var(--font-geist-sans), Arial, sans-serif",
-                opacity: busy ? 0.45 : 1,
-                transition: "opacity 0.15s",
-              }}
-              onMouseEnter={(e) => {
-                if (!busy)
-                  (e.currentTarget as HTMLElement).style.opacity = "0.8";
-              }}
-              onMouseLeave={(e) => {
-                if (!busy) (e.currentTarget as HTMLElement).style.opacity = "1";
-              }}
+              style={pillBtn(true)}
+              onMouseEnter={hoverDim}
+              onMouseLeave={hoverReset}
             >
               <IconShuffle />
               Shuffle
@@ -252,32 +270,25 @@ export default function Home() {
                 if (!busy) puzzleRef.current?.solve();
               }}
               disabled={busy}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 22px",
-                borderRadius: 9999,
-                backgroundColor: "#fff",
-                color: "#111",
-                border: "1px solid rgba(0,0,0,0.15)",
-                cursor: busy ? "not-allowed" : "pointer",
-                fontSize: "0.875rem",
-                fontWeight: 500,
-                fontFamily: "var(--font-geist-sans), Arial, sans-serif",
-                opacity: busy ? 0.45 : 1,
-                transition: "opacity 0.15s",
-              }}
-              onMouseEnter={(e) => {
-                if (!busy)
-                  (e.currentTarget as HTMLElement).style.opacity = "0.8";
-              }}
-              onMouseLeave={(e) => {
-                if (!busy) (e.currentTarget as HTMLElement).style.opacity = "1";
-              }}
+              style={pillBtn(false)}
+              onMouseEnter={hoverDim}
+              onMouseLeave={hoverReset}
             >
               <IconRefresh />
               Solve
+            </button>
+
+            <button
+              onClick={() => {
+                if (!busy) puzzleRef.current?.explode();
+              }}
+              disabled={busy}
+              style={pillBtn(false)}
+              onMouseEnter={hoverDim}
+              onMouseLeave={hoverReset}
+            >
+              <IconExplode />
+              Explode
             </button>
           </div>
 
