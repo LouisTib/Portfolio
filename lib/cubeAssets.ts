@@ -1,3 +1,5 @@
+"use client";
+
 import * as THREE from "three";
 
 export const materialCache = new Map<string, THREE.MeshStandardMaterial>();
