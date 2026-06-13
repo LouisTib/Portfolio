@@ -232,9 +232,3 @@ export function preloadCubeAssets(): Promise<void> {
 
   return preloadPromise;
 }
-
-// Kick it off as soon as this module is evaluated — i.e. as early as
-// the page bundle loads, well before the fall-in animation runs.
-if (typeof window !== "undefined") {
-  preloadCubeAssets();
-}
