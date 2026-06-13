@@ -1,7 +1,11 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
-import PuzzleScene from "@/components/PuzzleScene";
+import dynamic from "next/dynamic";
+
+const PuzzleScene = dynamic(() => import("@/components/PuzzleScene"), {
+  ssr: false,
+});
 import { PuzzleHandle, INTRO_TOTAL_DURATION } from "@/components/Puzzle";
 
 function IconMail() {
