@@ -15,8 +15,17 @@ const SPACING = 1.0005;
 const TARGET = Math.PI / 2;
 const SPEED = 4.2;
 
+const INTRO_STAGGER = 0.11;
+const INTRO_DURATION = 1.6;
+
 function ease(t: number) {
   return t < 0.5 ? 16 * t ** 5 : 1 - (-2 * t + 2) ** 5 / 2;
+}
+
+function easeIntro(t: number): number {
+  const c1 = 1.15;
+  const c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 }
 
 function inv(m: Move): Move {
@@ -59,6 +68,23 @@ export interface PuzzleHandle {
   isBusy: () => boolean;
 }
 
+// Camera is at [6, 4, 11] looking at origin.
+// We want cubies to start completely off-screen to the top-right.
+// Push them far in X and Y, and behind the camera in Z so they're
+// well outside the frustum before they sweep in.
+function buildStreamPositions(count: number): THREE.Vector3[] {
+  // Origin point: far top-right, behind the camera's right shoulder
+  const origin = new THREE.Vector3(60, 40, 30);
+  // Direction they're stacked along — trailing back further top-right
+  const streamDir = new THREE.Vector3(1, 0.8, 0.5).normalize();
+  const gap = 3.5;
+
+  return Array.from({ length: count }, (_, i) => {
+    const offset = (count - 1 - i) * gap;
+    return origin.clone().add(streamDir.clone().multiplyScalar(offset));
+  });
+}
+
 export default forwardRef<PuzzleHandle>((_, ref) => {
   const cubies = useRef<Cubie[]>(
     Array.from({ length: 27 }, (_, i) => {
@@ -78,20 +104,21 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
     }),
   );
 
-  // One ref per cubie — indexed by cubie.id — never remounted
   const cubieRefs = useRef<(THREE.Group | null)[]>(Array(27).fill(null));
-
   const queue = useRef<Move[]>([]);
   const history = useRef<Move[]>([]);
   const busy = useRef(false);
   const active = useRef<Move | null>(null);
   const elapsed = useRef(0);
+  const introElapsed = useRef(0);
+  const introDone = useRef(false);
+  const streamStarts = useRef<THREE.Vector3[]>(buildStreamPositions(27));
 
-  // Scratch objects — allocated once, reused every frame
   const _q = new THREE.Quaternion();
   const _qSpin = new THREE.Quaternion();
   const _axisVec = new THREE.Vector3();
   const _rot = new THREE.Matrix4();
+  const _tmp = new THREE.Vector3();
 
   const startNextMove = useCallback(() => {
     if (queue.current.length === 0) {
@@ -99,42 +126,89 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
       active.current = null;
       return;
     }
-    const move = queue.current.shift()!;
-    active.current = move;
+    active.current = queue.current.shift()!;
     elapsed.current = 0;
   }, []);
 
   useImperativeHandle(ref, () => ({
     shuffle() {
-      if (busy.current) return;
+      if (busy.current || !introDone.current) return;
       const moves = randomMoves(20);
-      // Prepend this shuffle's undo moves so prior shuffles can still be solved
       history.current = [...moves].reverse().map(inv).concat(history.current);
       queue.current = moves;
       busy.current = true;
       startNextMove();
     },
     solve() {
-      if (busy.current) return;
+      if (busy.current || !introDone.current) return;
       queue.current = history.current;
       history.current = [];
       busy.current = true;
       startNextMove();
     },
     isBusy() {
-      return busy.current;
+      return busy.current || !introDone.current;
     },
   }));
 
   useFrame((_, dt) => {
-    if (!active.current) return;
+    if (!introDone.current) {
+      introElapsed.current += dt;
+      const totalDuration = INTRO_STAGGER * 26 + INTRO_DURATION;
+      let allDone = true;
 
+      for (const c of cubies.current) {
+        const groupEl = cubieRefs.current[c.id];
+        if (!groupEl) continue;
+
+        const delay = c.id * INTRO_STAGGER;
+        const localT = (introElapsed.current - delay) / INTRO_DURATION;
+
+        const homePos = new THREE.Vector3(
+          (c.homeX - 1) * SPACING,
+          (c.homeY - 1) * SPACING,
+          (c.homeZ - 1) * SPACING,
+        );
+
+        if (localT <= 0) {
+          groupEl.position.copy(streamStarts.current[c.id]);
+          groupEl.visible = false;
+          allDone = false;
+        } else if (localT >= 1) {
+          groupEl.position.copy(homePos);
+          groupEl.visible = true;
+        } else {
+          allDone = false;
+          groupEl.visible = true;
+          const t = easeIntro(Math.min(localT, 1));
+          _tmp.lerpVectors(streamStarts.current[c.id], homePos, t);
+          groupEl.position.copy(_tmp);
+        }
+      }
+
+      if (allDone) {
+        introDone.current = true;
+        for (const c of cubies.current) {
+          const groupEl = cubieRefs.current[c.id];
+          if (groupEl) {
+            groupEl.visible = true;
+            groupEl.position.set(
+              (c.x - 1) * SPACING,
+              (c.y - 1) * SPACING,
+              (c.z - 1) * SPACING,
+            );
+          }
+        }
+      }
+      return;
+    }
+
+    if (!active.current) return;
     const move = active.current;
     elapsed.current += dt * SPEED;
     const t = Math.min(elapsed.current / TARGET, 1);
     const angle = ease(t) * TARGET * move.dir;
 
-    // Build the incremental spin quaternion for this frame's angle
     _axisVec.set(
       move.axis === "x" ? 1 : 0,
       move.axis === "y" ? 1 : 0,
@@ -145,16 +219,12 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
     for (const c of cubies.current) {
       const coord = move.axis === "x" ? c.x : move.axis === "y" ? c.y : c.z;
       if (coord !== move.layer) continue;
-
       const groupEl = cubieRefs.current[c.id];
       if (!groupEl) continue;
 
-      // Base (rest) position for this cubie
-      const bx = (c.x - 1) * SPACING;
-      const by = (c.y - 1) * SPACING;
-      const bz = (c.z - 1) * SPACING;
-
-      // Rotate the rest position around the layer axis
+      const bx = (c.x - 1) * SPACING,
+        by = (c.y - 1) * SPACING,
+        bz = (c.z - 1) * SPACING;
       if (move.axis === "x") {
         const cosA = Math.cos(angle),
           sinA = Math.sin(angle);
@@ -168,14 +238,11 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
           sinA = Math.sin(angle);
         groupEl.position.set(bx * cosA - by * sinA, bx * sinA + by * cosA, bz);
       }
-
-      // Compose spin on top of the accumulated orientation — NEVER touch .rotation
       _q.setFromRotationMatrix(c.matrix);
       groupEl.quaternion.copy(_qSpin).multiply(_q);
     }
 
     if (t >= 1) {
-      // Snap: bake final rotation into each cubie's matrix and reset to rest
       _axisVec.set(
         move.axis === "x" ? 1 : 0,
         move.axis === "y" ? 1 : 0,
@@ -186,8 +253,6 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
       for (const c of cubies.current) {
         const coord = move.axis === "x" ? c.x : move.axis === "y" ? c.y : c.z;
         if (coord !== move.layer) continue;
-
-        // Update logical position
         const px = c.x - 1,
           py = c.y - 1,
           pz = c.z - 1;
@@ -201,11 +266,7 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
           c.x = Math.round(-py * move.dir) + 1;
           c.y = Math.round(px * move.dir) + 1;
         }
-
-        // Bake into accumulated matrix
         c.matrix = _rot.clone().multiply(c.matrix);
-
-        // Reset group to new resting transform — quaternion only, no .rotation
         const groupEl = cubieRefs.current[c.id];
         if (groupEl) {
           groupEl.position.set(
@@ -217,7 +278,6 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
           groupEl.quaternion.copy(_q);
         }
       }
-
       active.current = null;
       startNextMove();
     }
@@ -232,9 +292,9 @@ export default forwardRef<PuzzleHandle>((_, ref) => {
             cubieRefs.current[c.id] = el;
           }}
           position={[
-            (c.x - 1) * SPACING,
-            (c.y - 1) * SPACING,
-            (c.z - 1) * SPACING,
+            (c.homeX - 1) * SPACING,
+            (c.homeY - 1) * SPACING,
+            (c.homeZ - 1) * SPACING,
           ]}
           origX={c.homeX}
           origY={c.homeY}
