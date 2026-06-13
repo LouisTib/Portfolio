@@ -5,6 +5,8 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Environment } from "@react-three/drei";
 import * as THREE from "three";
 import Puzzle, { PuzzleHandle } from "./Puzzle";
+import { preloadCubeAssets } from "@/lib/cubeAssets";
+import { useEffect } from "react";
 
 function AutoRotate({ children }: { children: React.ReactNode }) {
   const groupRef = useRef<THREE.Group>(null);
@@ -19,6 +21,9 @@ interface PuzzleSceneProps {
 }
 
 export default function PuzzleScene({ puzzleRef }: PuzzleSceneProps) {
+  useEffect(() => {
+    preloadCubeAssets();
+  }, []);
   return (
     <Canvas
       camera={{ position: [6, 4, 11], fov: 55 }}
