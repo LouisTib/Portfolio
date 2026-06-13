@@ -17,7 +17,7 @@ function AutoRotate({ children }: { children: React.ReactNode }) {
 }
 
 interface PuzzleSceneProps {
-  puzzleRef: React.RefObject<PuzzleHandle | null>;
+  puzzleRef: React.MutableRefObject<PuzzleHandle | null>;
 }
 
 export default function PuzzleScene({ puzzleRef }: PuzzleSceneProps) {
